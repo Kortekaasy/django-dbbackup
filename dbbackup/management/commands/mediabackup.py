@@ -3,20 +3,27 @@ Save media files.
 """
 
 import os
+from pathlib import Path
 import tarfile
 
-from django.core.files.storage import get_storage_class
+from django.core.files.storage import Storage
 from django.core.management.base import CommandError
+
+from typing import Dict
 
 from ... import utils
 from ...storage import StorageError, get_storage
 from ._base import BaseDbBackupCommand, make_option
 
+from dbbackup import settings
+
 
 class Command(BaseDbBackupCommand):
+ 
     help = """Backup media files, gather all in a tarball and encrypt or
     compress."""
     content_type = "media"
+    content_storages: Dict[str, Storage] = settings.BACKUP_LOCATIONS
 
     option_list = BaseDbBackupCommand.option_list + (
         make_option(
@@ -69,7 +76,6 @@ class Command(BaseDbBackupCommand):
         self.filename = options.get("output_filename")
         self.path = options.get("output_path")
         try:
-            self.media_storage = get_storage_class()()
             self.storage = get_storage()
             self.backup_mediafiles()
             if options.get("clean"):
@@ -78,15 +84,15 @@ class Command(BaseDbBackupCommand):
         except StorageError as err:
             raise CommandError(err) from err
 
-    def _explore_storage(self):
-        """Generator of all files contained in media storage."""
+    def _explore_storage(self, content_storage: Storage):
+        """Generator of all files contained in `content_storage`."""
         path = ""
         dirs = [path]
         while dirs:
             path = dirs.pop()
-            subdirs, files = self.media_storage.listdir(path)
-            for media_filename in files:
-                yield os.path.join(path, media_filename)
+            subdirs, files = content_storage.listdir(path)
+            for filename in files:
+                yield os.path.join(path, filename)
             dirs.extend([os.path.join(path, subdir) for subdir in subdirs])
 
     def _create_tar(self, name):
@@ -94,11 +100,13 @@ class Command(BaseDbBackupCommand):
         fileobj = utils.create_spooled_temporary_file()
         mode = "w:gz" if self.compress else "w"
         tar_file = tarfile.open(name=name, fileobj=fileobj, mode=mode)
-        for media_filename in self._explore_storage():
-            tarinfo = tarfile.TarInfo(media_filename)
-            media_file = self.media_storage.open(media_filename)
-            tarinfo.size = len(media_file)
-            tar_file.addfile(tarinfo, media_file)
+        for label, content_storage in self.content_storages.items():
+            for content_filename in self._explore_storage(content_storage):
+                tarinfo = tarfile.TarInfo(str(Path(label, content_filename)))
+                content_file = content_storage.open(content_filename)
+                tarinfo.size = len(content_file)
+                self.logger.info("Adding %s - %s", tarinfo.name, tarinfo.path)
+                tar_file.addfile(tarinfo, content_file)
         # Close the TAR for writing
         tar_file.close()
         return fileobj
@@ -126,6 +134,8 @@ class Command(BaseDbBackupCommand):
         # Store backup
         tarball.seek(0)
         if self.path is None:
+            self.logger.info("Writing backup file to %s", filename)
             self.write_to_storage(tarball, filename)
         else:
+            self.logger.info("Writing backup file to %s", self.path)
             self.write_local_file(tarball, self.path)

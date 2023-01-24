@@ -2,18 +2,23 @@
 Restore media files.
 """
 import tarfile
+from pathlib import Path
 
-from django.core.files.storage import get_storage_class
+from django.core.files.storage import Storage
+from typing import Dict
 
 from ... import utils
 from ...storage import get_storage
 from ._base import BaseDbBackupCommand, make_option
+
+from dbbackup import settings
 
 
 class Command(BaseDbBackupCommand):
     help = """Restore a media backup from storage, encrypted and/or
     compressed."""
     content_type = "media"
+    content_storages: Dict[str, Storage] = settings.BACKUP_LOCATIONS
 
     option_list = (
         make_option(
@@ -70,20 +75,19 @@ class Command(BaseDbBackupCommand):
         self.interactive = options.get("interactive")
 
         self.storage = get_storage()
-        self.media_storage = get_storage_class()()
         self._restore_backup()
 
-    def _upload_file(self, name, media_file):
-        if self.media_storage.exists(name):
+    def _upload_file(self, name, content_storage, content_file):
+        if content_storage.exists(name):
             if not self.replace:
                 return
-            self.media_storage.delete(name)
-            self.logger.info("%s deleted", name)
-        self.media_storage.save(name, media_file)
-        self.logger.info("%s uploaded", name)
+            content_storage.delete(name)
+            self.logger.info("%s deleted from %s", name, content_storage)
+        content_storage.save(name, content_file)
+        self.logger.info("%s uploaded to %s", name, content_storage)
 
     def _restore_backup(self):
-        self.logger.info("Restoring backup for media files")
+        self.logger.info(f"Restoring backup for {self.content_type} files")
         input_filename, input_file = self._get_backup_file(servername=self.servername)
         self.logger.info("Restoring: %s", input_filename)
 
@@ -105,11 +109,15 @@ class Command(BaseDbBackupCommand):
             else tarfile.open(fileobj=input_file, mode="r:")
         )
         # Restore file 1 by 1
-        for media_file_info in tar_file:
-            if media_file_info.path == "media":
-                continue  # Don't copy root directory
-            media_file = tar_file.extractfile(media_file_info)
-            if media_file is None:
+        for file_info in tar_file:
+            p = Path(file_info.path)
+            content_storage_label = p.parts[0]
+            content_storage = self.content_storages[content_storage_label]
+            self.logger.info("extracting %s for %s", p, content_storage_label)
+            # if file_info.path == self.content_type:
+            #     continue  # Don't copy root directory
+            content_file = tar_file.extractfile(file_info)
+            if content_file is None:
                 continue  # Skip directories
-            name = media_file_info.path.replace("media/", "")
-            self._upload_file(name, media_file)
+            name = str(Path(*p.parts[1:]))
+            self._upload_file(name, content_storage, content_file)

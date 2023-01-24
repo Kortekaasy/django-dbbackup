@@ -4,6 +4,7 @@ import socket
 import tempfile
 
 from django.conf import settings
+from django.core.files.storage import default_storage
 
 DATABASES = getattr(settings, "DBBACKUP_DATABASES", list(settings.DATABASES.keys()))
 
@@ -21,6 +22,15 @@ CLEANUP_KEEP_MEDIA = getattr(settings, "DBBACKUP_CLEANUP_KEEP_MEDIA", CLEANUP_KE
 CLEANUP_KEEP_FILTER = getattr(settings, "DBBACKUP_CLEANUP_KEEP_FILTER", lambda x: False)
 
 MEDIA_PATH = getattr(settings, "DBBACKUP_MEDIA_PATH", settings.MEDIA_ROOT)
+
+# Storage locations to back up 
+BACKUP_LOCATIONS = getattr(
+    settings, 
+    "DBBACKUP_BACKUP_LOCATIONS", 
+    {
+        "media": default_storage
+    }
+)
 
 DATE_FORMAT = getattr(settings, "DBBACKUP_DATE_FORMAT", "%Y-%m-%d-%H%M%S")
 FILENAME_TEMPLATE = getattr(

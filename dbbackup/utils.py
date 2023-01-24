@@ -420,7 +420,7 @@ def filename_generate(
     elif content_type == "media":
         template = settings.MEDIA_FILENAME_TEMPLATE
     else:
-        template = settings.FILENAME_TEMPLATE
+        template = settings.FILE_FILENAME_TEMPLATE
 
     params = {
         "servername": servername or settings.HOSTNAME,
